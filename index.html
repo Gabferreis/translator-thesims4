@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="pt-BR">
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <link rel="icon" type="image/svg+xml" href="assets/icon.svg" />
+  <title>The Sims 4 Translator</title>
+  <meta name="claude:viewport-fit-sides" content="cover">
+  <link rel="stylesheet"
+    href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&family=Space+Grotesk:wght@500;700&display=swap">
+  <link rel="stylesheet" href="style.css">
+
+  <div class="wrap">
+    <header>
+      <h1>The Sims 4 Translator</h1>
+      <p class="lead">Abra um arquivo .package do Sims 4, traduza as frases e baixe o pacote pronto. Marcadores como
+        <span class="tok">{1.SimFirstName}</span> e <span class="tok">&lt;b&gt;</span> ficam travados e só o texto ao
+        redor é traduzido.</p>
+    </header>
+
+    <div class="drop" id="drop">
+      <div><b id="fileName">Nenhum arquivo aberto</b><small id="fileInfo">Arraste um .package para cá ou use o botão ao
+          lado.</small></div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn primary" id="btnOpen" type="button">Abrir .package</button>
+        <input id="file" type="file" accept=".package" hidden>
+      </div>
+    </div>
+    <div id="notice" class="note" hidden></div>
+    <section class="panel" id="howto" aria-label="Como funciona">
+      <h2>Como funciona</h2>
+      <ol style="margin:8px 0 0;padding-left:20px;display:flex;flex-direction:column;gap:4px">
+        <li>Abra o .package do mod. A página lê as tabelas de strings (STBL) e mostra o texto de origem.</li>
+        <li>Traduza com uma IA, em lote ou uma a uma, ou escreva à mão. Marcadores como <span
+            class="tok">{0.SimFirstName}</span> ficam protegidos.</li>
+        <li>Baixe o pacote. A tradução entra como uma tabela nova no idioma escolhido e o resto do mod não muda.</li>
+      </ol>
+    </section>
+
+    <section class="panel" id="config" hidden aria-label="Configuração">
+      <div class="grid">
+        <label class="f" for="srcSel">Tabela de origem
+          <select id="srcSel"></select></label>
+        <label class="f" for="tgtSel">Traduzir para
+          <select id="tgtSel"></select></label>
+        <label class="f" for="ctx">Contexto e tom (opcional)
+          <input id="ctx" type="text" placeholder="Ex.: mod de visitas entre vizinhos, tom casual"></label>
+      </div>
+      <p class="legend" style="margin:12px 0 0">A tradução substitui todas as outras tabelas de strings do pacote, em
+        qualquer idioma. A tabela de origem fica como está. Se o pacote só tiver a tabela de origem, a página cria uma
+        no idioma escolhido.</p>
+      <label class="chk" for="alsoSrc"><input type="checkbox" id="alsoSrc">
+        <span>Substituir também a tabela de origem.</span></label>
+      <div id="engine" hidden>
+        <h2 style="margin-top:16px">Conectar uma IA</h2>
+        <p>A chamada sai direto do seu navegador para o serviço escolhido. Para modelos locais (Ollama, LM Studio), use
+          o endereço local e deixe a chave em branco.</p>
+        <div class="grid" style="margin-top:10px">
+          <label class="f" for="prov">Serviço
+            <select id="prov">
+              <option value="openai">OpenAI e compatíveis</option>
+              <option value="ollama">Ollama (modelo local)</option>
+              <option value="gemini">Google Gemini</option>
+              <option value="anthropic">Anthropic (Claude)</option>
+            </select></label>
+          <label class="f" for="apiUrl" id="urlWrap">Endereço da API
+            <input id="apiUrl" type="text" value="https://api.openai.com/v1" autocomplete="off"></label>
+          <label class="f" for="apiModel">Modelo
+            <input id="apiModel" type="text" value="gpt-4o-mini" autocomplete="off" list="ollamaModels"><datalist
+              id="ollamaModels"></datalist></label>
+          <label class="f" for="apiKey" id="keyWrap">Chave da API
+            <input id="apiKey" type="password" autocomplete="off"></label>
+        </div>
+        <div class="actions" id="ollamaBox" hidden style="margin-top:10px">
+          <button class="btn" id="btnTags" type="button">Ver modelos instalados</button>
+          <span class="legend" style="flex:1;min-width:220px">Precisa do Ollama aberto neste computador. Se der erro de
+            conexão, inicie-o com a variável OLLAMA_ORIGINS=*. Modelos pequenos erram mais marcadores, então os lotes
+            são menores.</span>
+        </div>
+        <label class="chk" for="remember"><input type="checkbox" id="remember"><span>Lembrar a chave neste navegador.
+            Ela fica salva só neste computador e é enviada apenas ao serviço escolhido.</span></label>
+      </div>
+      <div class="actions">
+        <button class="btn primary" id="btnOne" type="button" hidden>Traduzir tudo e baixar</button>
+        <button class="btn" id="btnAll" type="button" hidden>Traduzir pendentes</button>
+        <button class="btn" id="btnRev" type="button" hidden>Traduzir os para revisar</button>
+        <button class="btn" id="btnStop" type="button" hidden>Cancelar</button>
+        <button class="btn" id="btnDl" type="button">Baixar pacote traduzido</button>
+        <div class="progress" id="progress" hidden><span id="progText"></span>
+          <div class="bar"><i id="progBar"></i></div>
+        </div>
+      </div>
+      <p class="legend" id="dlNote" style="margin:12px 0 0">O botão baixa o arquivo .package pronto. Coloque na pasta
+        Mods.</p>
+    </section>
+
+    <section class="panel" id="tools" hidden aria-label="Ferramentas">
+      <div class="grid2">
+        <div>
+          <h2>Traduzir com outra IA</h2>
+          <p>Copie o pedido, cole no ChatGPT, Gemini ou outra IA e traga a resposta de volta. Os marcadores são
+            conferidos na importação.</p>
+          <div class="actions" style="margin-top:10px">
+            <label class="f" for="batchN" style="flex-direction:row;align-items:center;gap:8px">Strings por pedido
+              <input class="num" id="batchN" type="number" min="1" max="300" value="60"></label>
+            <button class="btn primary" id="btnCopyReq" type="button">Copiar pedido</button>
+          </div>
+          <textarea id="reqBox" readonly hidden aria-label="Pedido para a IA"></textarea>
+          <textarea id="pasteBox"
+            placeholder="Cole aqui a resposta da IA. Cada linha começa com o id, como [0x797AA74F] texto traduzido"
+            aria-label="Resposta da IA"></textarea>
+          <div class="actions"><button class="btn" id="btnImportAi" type="button">Importar resposta</button></div>
+        </div>
+        <div>
+          <h2>Reaproveitar tradução anterior</h2>
+          <p>Abra o .package traduzido da versão antiga do mod. Strings com o mesmo original entram prontas. Se o
+            original mudou, a tradução entra marcada em Revisar, com o texto antigo à vista.</p>
+          <label class="chk" for="overwrite"><input type="checkbox" id="overwrite"><span>Substituir também o que já está
+              preenchido</span></label>
+          <div class="actions">
+            <button class="btn" id="btnOld" type="button">Importar .package antigo</button>
+            <input id="oldFile" type="file" accept=".package" hidden>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <div id="listArea" hidden>
+      <div class="bar-top">
+        <div class="stats" id="stats"></div>
+        <div style="display:flex;gap:8px;flex:1;justify-content:flex-end;flex-wrap:wrap">
+          <input class="search" id="q" type="search" placeholder="Buscar texto ou chave" aria-label="Buscar">
+          <div class="tabs" role="group" aria-label="Filtro">
+            <button type="button" data-f="all" aria-pressed="true">Todas</button>
+            <button type="button" data-f="pending" aria-pressed="false">Pendentes</button>
+            <button type="button" data-f="done" aria-pressed="false">Traduzidas</button>
+            <button type="button" data-f="review" aria-pressed="false">Revisar</button>
+          </div>
+        </div>
+      </div>
+      <div class="rows" id="rows" style="margin-top:12px"></div>
+      <div class="more" id="more" hidden></div>
+    </div>
+  </div>
+
+
+  <script src="script.js"></script>
+
+</html>
