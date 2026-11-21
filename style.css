@@ -501,6 +501,30 @@ h2 {
     padding: 5px 8px
 }
 
+.help {
+    font-size: 13px;
+    color: var(--muted)
+}
+
+.help summary {
+    cursor: pointer;
+    font-weight: 500;
+    color: var(--fg)
+}
+
+.help p {
+    margin: 6px 0 0
+}
+
+.help code {
+    font-family: var(--font-m);
+    background: var(--surface2);
+    padding: 0 4px;
+    border-radius: 4px;
+    color: var(--fg);
+    overflow-wrap: anywhere
+}
+
 .note {
     padding: 10px 14px;
     border-radius: 8px;

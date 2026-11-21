@@ -13,7 +13,7 @@
 
   <div class="wrap">
     <header>
-      <h1>The Sims 4 Translator</h1>
+      <h1>Oficina de Strings</h1>
       <p class="lead">Abra um arquivo .package do Sims 4, traduza as frases e baixe o pacote pronto. Marcadores como
         <span class="tok">{1.SimFirstName}</span> e <span class="tok">&lt;b&gt;</span> ficam travados e só o texto ao
         redor é traduzido.</p>
@@ -40,7 +40,7 @@
 
     <section class="panel" id="config" hidden aria-label="Configuração">
       <div class="grid">
-        <label class="f" for="srcSel">Tabela de origem
+        <label class="f" for="srcSel">Idioma de origem
           <select id="srcSel"></select></label>
         <label class="f" for="tgtSel">Traduzir para
           <select id="tgtSel"></select></label>
@@ -77,6 +77,18 @@
           <span class="legend" style="flex:1;min-width:220px">Precisa do Ollama aberto neste computador. Se der erro de
             conexão, inicie-o com a variável OLLAMA_ORIGINS=*. Modelos pequenos erram mais marcadores, então os lotes
             são menores.</span>
+          <details class="help" style="flex-basis:100%">
+            <summary>Como liberar o acesso do navegador ao Ollama</summary>
+            <p>Este arquivo é aberto direto do disco, então o navegador o apresenta como uma origem desconhecida e o
+              Ollama recusa por padrão. Libere uma vez e reinicie o Ollama.</p>
+            <p><b>Windows:</b> no PowerShell rode <code>setx OLLAMA_ORIGINS "*"</code>, feche o Ollama pela bandeja do
+              relógio e abra de novo.</p>
+            <p><b>macOS:</b> rode <code>launchctl setenv OLLAMA_ORIGINS "*"</code> e reabra o app do Ollama.</p>
+            <p><b>Linux:</b> rode <code>sudo systemctl edit ollama.service</code>, acrescente <code>[Service]</code> e
+              <code>Environment="OLLAMA_ORIGINS=*"</code>, depois <code>sudo systemctl restart ollama</code>.</p>
+            <p>Alternativa pelo terminal, com o Ollama fechado: <code>OLLAMA_ORIGINS=* ollama serve</code>. No
+              PowerShell: <code>$env:OLLAMA_ORIGINS="*"; ollama serve</code>.</p>
+          </details>
         </div>
         <label class="chk" for="remember"><input type="checkbox" id="remember"><span>Lembrar a chave neste navegador.
             Ela fica salva só neste computador e é enviada apenas ao serviço escolhido.</span></label>
@@ -130,6 +142,7 @@
       <div class="bar-top">
         <div class="stats" id="stats"></div>
         <div style="display:flex;gap:8px;flex:1;justify-content:flex-end;flex-wrap:wrap">
+          <select class="search" id="tblSel" aria-label="Tabela de origem" style="flex:0 1 240px" hidden></select>
           <input class="search" id="q" type="search" placeholder="Buscar texto ou chave" aria-label="Buscar">
           <div class="tabs" role="group" aria-label="Filtro">
             <button type="button" data-f="all" aria-pressed="true">Todas</button>

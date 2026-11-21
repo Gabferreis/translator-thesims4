@@ -84,7 +84,7 @@ function zipOne(name, data) {
 }
 
 /* ---------- estado ---------- */
-const S = { name: '', pkg: null, tables: [], src: 0, tgt: 17, rows: [], filter: 'all', q: '', page: 0, busy: false, abort: null, sample: null, downloads: null, example: false };
+const S = { name: '', pkg: null, tables: [], srcLang: 0, tblFilter: 'all', multi: false, tgt: 17, rows: [], filter: 'all', q: '', page: 0, busy: false, abort: null, sample: null, downloads: null, example: false };
 const rowViews = new Map();
 
 function notice(msg, err) { const n = $('#notice'); if (!msg) { n.hidden = true; return } n.hidden = false; n.className = 'note' + (err ? ' err' : ''); n.textContent = msg }
@@ -95,34 +95,43 @@ async function loadBytes(u8, name, isExample) {
         const pkg = parsePackage(u8);
         const tables = [];
         for (const e of pkg.entries.filter(e => e.type === STBL_TYPE)) {
-            try { const st = parseStbl(await entryData(e)); tables.push({ entry: e, lang: e.instHi >>> 24, items: st.items, version: st.version }) } catch (err) { console.warn(err) }
+            try { const st = parseStbl(await entryData(e)); tables.push({ entry: e, lang: e.instHi >>> 24, items: st.items, version: st.version, tid: ((e.instHi & 0xFFFFFF) >>> 0).toString(16) + ':' + e.instLo.toString(16) }) } catch (err) { console.warn(err) }
         }
         if (!tables.length) throw new Error('Nenhuma tabela de strings (STBL) encontrada neste pacote.');
         S.pkg = pkg; S.tables = tables; S.name = name; S.example = !!isExample;
-        let best = tables.findIndex(t => t.lang === 0); if (best < 0) best = tables.reduce((a, t, i) => t.items.length > tables[a].items.length ? i : a, 0);
-        S.src = best;
-        const used = new Set(tables.map(t => t.lang));
+        const cnt = new Map(); tables.forEach(t => cnt.set(t.lang, (cnt.get(t.lang) || 0) + t.items.length));
+        S.srcLang = cnt.has(0) ? 0 : [...cnt.entries()].sort((a, b) => b[1] - a[1])[0][0];
         S.tgt = 17;
         setupConfig(); buildRows();
         $('#fileName').textContent = name;
-        $('#fileInfo').textContent = pkg.entries.length + ' recursos · ' + tables.length + ' tabelas de strings';
+        $('#fileInfo').textContent = pkg.entries.length + ' recursos · ' + tables.length + ' tabelas de strings em ' + cnt.size + (cnt.size === 1 ? ' idioma' : ' idiomas');
         notice(''); $('#howto').hidden = true;
     } catch (err) { notice(err.message || String(err), true) }
 }
 function setupConfig() {
     $('#config').hidden = false; $('#tools').hidden = false; $('#listArea').hidden = false;
-    const ss = $('#srcSel'); ss.replaceChildren(...S.tables.map((t, i) => el('option', { value: i }, langName(t.lang) + ' · ' + t.items.length + ' strings'))); ss.value = S.src;
+    const ss = $('#srcSel');
+    ss.replaceChildren(...[...new Set(S.tables.map(t => t.lang))].map(l => { const ts = S.tables.filter(t => t.lang === l); const n = ts.reduce((a, t) => a + t.items.length, 0); return el('option', { value: l }, langName(l) + ' · ' + (ts.length > 1 ? ts.length + ' tabelas · ' : '') + n + ' strings') }));
+    ss.value = S.srcLang;
     const ts = $('#tgtSel'); ts.replaceChildren(...LANGS.map(l => el('option', { value: l[0] }, l[1] + (S.tables.some(t => t.lang === l[0]) ? ' (já existe)' : '')))); ts.value = S.tgt;
 }
+const srcTables = () => S.tables.filter(t => t.lang === S.srcLang);
+function setupTblFilter() {
+    const st = srcTables(), sel = $('#tblSel');
+    S.multi = st.length > 1; S.tblFilter = 'all'; sel.hidden = !S.multi;
+    if (!S.multi) return;
+    sel.replaceChildren(el('option', { value: 'all' }, 'Todas as tabelas'), ...st.map((t, i) => el('option', { value: t.tid }, 'Tabela ' + (i + 1) + ' · ' + hex(t.entry.instLo) + ' · ' + t.items.length + ' strings')));
+    sel.value = 'all';
+}
 function buildRows() {
-    const t = S.tables[S.src];
-    const prev = S.tables.find(x => x.lang === S.tgt && x !== t);
-    const map = new Map(prev ? prev.items.map(i => [i.key, i.text]) : []);
-    S.rows = t.items.map(it => {
-        const kept = !translatable(it.text); const old = map.get(it.key);
-        return { key: it.key, flags: it.flags, src: it.text, kept, tr: kept ? it.text : (old !== undefined && old !== it.text ? old : '') }
-    });
-    renderList(true);
+    const prev = new Map();
+    if (S.tgt !== S.srcLang) S.tables.filter(x => x.lang === S.tgt).forEach(x => x.items.forEach(i => prev.set(i.key, i.text)));
+    S.rows = [];
+    srcTables().forEach((t, ti) => t.items.forEach(it => {
+        const kept = !translatable(it.text), old = prev.get(it.key);
+        S.rows.push({ key: it.key, flags: it.flags, src: it.text, kept, tid: t.tid, ti: ti + 1, tr: kept ? it.text : (old !== undefined && old !== it.text ? old : '') });
+    }));
+    setupTblFilter(); renderList(true);
 }
 
 /* ---------- lista ---------- */
@@ -130,6 +139,7 @@ function visible() {
     const q = S.q.trim().toLowerCase();
     return S.rows.filter(r => {
         const st = status(r);
+        if (S.tblFilter !== 'all' && r.tid !== S.tblFilter) return false;
         if (S.filter === 'pending' && st !== 'pending') return false;
         if (S.filter === 'done' && st !== 'ok') return false;
         if (S.filter === 'review' && st !== 'warn' && st !== 'changed') return false;
@@ -200,13 +210,13 @@ function rowEl(r) {
             r.tr ? el('button', { class: 'btn sm', type: 'button', onclick: () => { ta.value = ''; r.tr = ''; r.changed = false; view.upd() } }, 'Limpar') : null);
         trBox.append(ta, msg, acts);
     }
-    const row = el('div', { class: 'row' }, el('div', { class: 'key' }, el('span', {}, hex(r.key)), pill), el('div', {}, chips(r.src, el('div', { class: 'src' })), r.changed ? el('div', { class: 'oldsrc' }, 'Original anterior: ' + r.oldSrc) : null), trBox);
+    const row = el('div', { class: 'row' }, el('div', { class: 'key' }, el('span', {}, hex(r.key)), pill, S.multi ? el('span', {}, 'tabela ' + r.ti) : null), el('div', {}, chips(r.src, el('div', { class: 'src' })), r.changed ? el('div', { class: 'oldsrc' }, 'Original anterior: ' + r.oldSrc) : null), trBox);
     view.upd(); return row;
 }
 
 /* ---------- tradução com Claude ---------- */
 function promptFor(items, lang, ctx, hint) {
-    return `Você traduz textos de interface do jogo The Sims 4 (de ${langName(S.tables[S.src].lang)} para ${lang}).
+    return `Você traduz textos de interface do jogo The Sims 4 (de ${langName(S.srcLang)} para ${lang}).
 Regras obrigatórias:
 - Preserve exatamente, sem traduzir, alterar ou remover, todos os marcadores: trechos entre chaves como {0.SimFirstName} ou {1.String}, tags entre < >, sequências \\n e %s/%d. Cada marcador do original deve aparecer na tradução na mesma quantidade. Pode movê-los para onde a gramática da língua pedir.
 - Traduza apenas o texto ao redor. Mantenha pontuação e tom de fala de jogo, natural e curto. "Sim" (personagem) não se traduz.
@@ -265,17 +275,22 @@ async function translateRows(rows) {
 
 /* ---------- exportar ---------- */
 async function exportPackage(safe) {
-    const srcT = S.tables[S.src];
-    const items = S.rows.map(r => ({ key: r.key, flags: r.flags, text: (!r.tr.trim() || (safe && status(r) === 'warn')) ? r.src : r.tr }));
-    const data = buildStbl(srcT.version || 5, items);
-    const mk = lang => ({ type: STBL_TYPE, group: srcT.entry.group, instHi: ((lang << 24) | (srcT.entry.instHi & 0xFFFFFF)) >>> 0, instLo: srcT.entry.instLo });
-    const others = S.pkg.entries.filter(e => e.type === STBL_TYPE && e !== srcT.entry);
-    const reps = others.map(e => ({ entry: { type: e.type, group: e.group, instHi: e.instHi, instLo: e.instLo }, data }));
-    if (!others.length) reps.push({ entry: mk(S.tgt), data });
-    if ($('#alsoSrc').checked) { const e = srcT.entry; reps.push({ entry: { type: e.type, group: e.group, instHi: e.instHi, instLo: e.instLo }, data }) }
-    S.lastRep = reps.length;
-    const pkg = buildPackage(S.pkg, reps);
-    return pkg;
+    const st = srcTables();
+    const text = r => (!r.tr.trim() || (safe && status(r) === 'warn')) ? r.src : r.tr;
+    const srcEntries = new Set(st.map(t => t.entry));
+    const others = S.pkg.entries.filter(e => e.type === STBL_TYPE && !srcEntries.has(e));
+    const tidOf = e => ((e.instHi & 0xFFFFFF) >>> 0).toString(16) + ':' + e.instLo.toString(16);
+    const ek = e => ({ type: e.type, group: e.group, instHi: e.instHi, instLo: e.instLo });
+    const reps = [], mapped = new Set(); let created = 0;
+    for (const t of st) {
+        const data = buildStbl(t.version || 5, S.rows.filter(r => r.tid === t.tid).map(r => ({ key: r.key, flags: r.flags, text: text(r) })));
+        const mine = others.filter(e => tidOf(e) === t.tid);
+        mine.forEach(e => { mapped.add(e); reps.push({ entry: ek(e), data }) });
+        if (!mine.length && S.tgt !== S.srcLang) { created++; reps.push({ entry: { type: STBL_TYPE, group: t.entry.group, instHi: ((S.tgt << 24) | (t.entry.instHi & 0xFFFFFF)) >>> 0, instLo: t.entry.instLo }, data }) }
+        if ($('#alsoSrc').checked) reps.push({ entry: ek(t.entry), data });
+    }
+    S.lastRep = reps.length; S.lastCreated = created; S.lastOrphans = others.filter(e => !mapped.has(e)).length;
+    return buildPackage(S.pkg, reps);
 }
 async function download(safe) {
     try {
@@ -284,7 +299,7 @@ async function download(safe) {
         const inner = base + '_' + langName(S.tgt).normalize('NFD').replace(/[^A-Za-z0-9]+/g, '') + '.package';
         const pend = S.rows.filter(r => status(r) === 'pending').length;
         const wn = safe ? S.rows.filter(r => status(r) === 'warn').length : 0;
-        const extra = ' ' + S.lastRep + (S.lastRep === 1 ? ' tabela de strings gravada.' : ' tabelas de strings substituídas.') + (pend ? ' ' + pend + ' strings pendentes foram gravadas com o texto original.' : '') + (wn ? ' ' + wn + ' strings voltaram da IA com marcadores alterados e ficaram no texto original por segurança. Ajuste-as no filtro Revisar e baixe de novo.' : '');
+        const extra = ' ' + S.lastRep + (S.lastRep === 1 ? ' tabela de strings gravada.' : ' tabelas de strings substituídas.') + (S.lastCreated ? ' ' + S.lastCreated + ' criadas no idioma escolhido por não ter correspondente.' : '') + (S.lastOrphans ? ' ' + S.lastOrphans + ' de outros idiomas sem correspondente na origem foram mantidas.' : '') + (pend ? ' ' + pend + ' strings pendentes foram gravadas com o texto original.' : '') + (wn ? ' ' + wn + ' strings voltaram da IA com marcadores alterados e ficaram no texto original por segurança. Ajuste-as no filtro Revisar e baixe de novo.' : '');
         if (S.downloads) {
             await S.downloads.save({ filename: inner.replace(/\.package$/, '.zip'), data: zipOne(inner, pkg) });
             notice('Arquivo salvo como .zip. Extraia o .package para a pasta Mods.' + extra);
@@ -318,13 +333,13 @@ function importAi() {
     try {
         const arr = parseReply($('#pasteBox').value);
         if (!arr.length) throw new Error('Não encontrei traduções. Cada linha deve começar com o id entre colchetes, como [0x797AA74F] texto.');
-        const byKey = new Map(S.rows.map(r => [hex(r.key).toLowerCase(), r]));
+        const byKey = new Map(); S.rows.forEach(r => { const k = hex(r.key).toLowerCase(); (byKey.get(k) || byKey.set(k, []).get(k)).push(r) });
         let ok = 0, skip = 0, warn = 0;
         for (const o of arr) {
-            const r = byKey.get(String(o && o.id).toLowerCase());
-            if (!r || r.kept || typeof o.text !== 'string') { skip++; continue }
-            r.tr = o.text; r.changed = false; ok++;
-            const d = diffTokens(r.src, r.tr); if (d.missing.length || d.extra.length) warn++;
+            const rs = (byKey.get(String(o && o.id).toLowerCase()) || []).filter(r => !r.kept);
+            if (!rs.length || typeof o.text !== 'string') { skip++; continue }
+            ok++;
+            for (const r of rs) { r.tr = o.text; r.changed = false; const d = diffTokens(r.src, r.tr); if (d.missing.length || d.extra.length) warn++ }
         }
         $('#pasteBox').value = ''; $('#reqBox').hidden = true;
         notice(ok + ' traduções importadas' + (warn ? ', ' + warn + ' com marcadores diferentes (veja o filtro Revisar)' : '') + (skip ? '. ' + skip + ' itens ignorados por id desconhecido.' : '.'), false);
@@ -355,12 +370,11 @@ async function importOldFile(f) {
         const pkg = parsePackage(new Uint8Array(await f.arrayBuffer()));
         const tabs = [];
         for (const e of pkg.entries.filter(e => e.type === STBL_TYPE)) { try { tabs.push({ lang: e.instHi >>> 24, items: parseStbl(await entryData(e)).items }) } catch (_) { } }
-        const tg = tabs.find(t => t.lang === S.tgt);
-        if (!tg) throw new Error('O pacote antigo não tem tabela em ' + langName(S.tgt) + '. Troque "Traduzir para" ou use outro arquivo.');
-        const sl = S.tables[S.src].lang;
-        const sr = tabs.find(t => t.lang === sl) || tabs.find(t => t.lang === 0);
-        const sm = new Map(sr ? sr.items.map(i => [i.key, i.text]) : []);
-        for (const i of tg.items) map.set(i.key, { src: sm.get(i.key), tr: i.text });
+        const tgs = tabs.filter(t => t.lang === S.tgt);
+        if (!tgs.length) throw new Error('O pacote antigo não tem tabela em ' + langName(S.tgt) + '. Troque "Traduzir para" ou use outro arquivo.');
+        let srs = tabs.filter(t => t.lang === S.srcLang); if (!srs.length) srs = tabs.filter(t => t.lang === 0);
+        const sm = new Map(); srs.forEach(t => t.items.forEach(i => sm.set(i.key, i.text)));
+        tgs.forEach(t => t.items.forEach(i => map.set(i.key, { src: sm.get(i.key), tr: i.text })));
         applyOld(map, $('#overwrite').checked);
     } catch (e) { notice(e.message || String(e), true) }
 }
@@ -381,22 +395,33 @@ async function callAI(prompt, signal, ids) {
     else if (prov === 'ollama') { url = $('#apiUrl').value.trim().replace(/\/+$/, '') + '/api/chat'; body = { model, stream: false, options: { temperature: 0.2 }, messages: [{ role: 'user', content: prompt }] } }
     else if (prov === 'gemini') { url = 'https://generativelanguage.googleapis.com/v1beta/models/' + encodeURIComponent(model) + ':generateContent'; headers['x-goog-api-key'] = key; body = { contents: [{ parts: [{ text: prompt }] }], generationConfig: { temperature: 0.2 } } }
     else { url = 'https://api.anthropic.com/v1/messages'; headers['x-api-key'] = key; headers['anthropic-version'] = '2023-06-01'; headers['anthropic-dangerous-direct-browser-access'] = 'true'; body = { model, max_tokens: 8000, messages: [{ role: 'user', content: prompt }] } }
-    const res = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body), signal });
+    let res;
+    try { res = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body), signal }) }
+    catch (e) { if (e && e.name === 'AbortError') throw e; if (prov === 'ollama') throw new Error(await diagnoseOllama($('#apiUrl').value)); throw e }
     const raw = await res.text();
-    if (!res.ok) { const e = new Error(prov === 'ollama' && res.status === 404 ? 'Modelo "' + model + '" não encontrado no Ollama. Use "Ver modelos instalados" ou rode ollama pull ' + model + '.' : res.status === 401 || res.status === 403 ? 'O serviço recusou a chave (' + res.status + ').' : res.status === 429 ? 'Limite de uso do serviço atingido (429).' : res.status + ': ' + raw.slice(0, 200)); if (res.status === 429) e.code = 'rate_limited'; throw e }
+    if (!res.ok) { const e = new Error(prov === 'ollama' && res.status === 403 ? 'O Ollama recusou a chamada vinda deste arquivo (403). Libere com OLLAMA_ORIGINS=* e reinicie o Ollama. As instruções estão em "Como liberar o acesso do navegador ao Ollama".' : prov === 'ollama' && res.status === 404 ? 'Modelo "' + model + '" não encontrado no Ollama. Use "Ver modelos instalados" ou rode ollama pull ' + model + '.' : res.status === 401 || res.status === 403 ? 'O serviço recusou a chave (' + res.status + ').' : res.status === 429 ? 'Limite de uso do serviço atingido (429).' : res.status + ': ' + raw.slice(0, 200)); if (res.status === 429) e.code = 'rate_limited'; throw e }
     const j = JSON.parse(raw);
     const text = prov === 'ollama' ? (j.message && j.message.content) : prov === 'openai' ? (j.choices && j.choices[0] && j.choices[0].message && j.choices[0].message.content) : prov === 'gemini' ? ((j.candidates && j.candidates[0] && j.candidates[0].content && j.candidates[0].content.parts) || []).map(p => p.text || '').join('') : (j.content || []).map(c => c.text || '').join('');
     return replyOrThrow(text, ids);
 }
+async function diagnoseOllama(base) {
+    base = base.trim().replace(/\/+$/, '');
+    let up = false;
+    try { await fetch(base + '/api/tags', { mode: 'no-cors' }); up = true } catch (e) { }
+    return up
+        ? 'O Ollama está rodando em ' + base + ', mas recusa chamadas vindas deste arquivo (CORS). Libere com OLLAMA_ORIGINS=* e reinicie o Ollama. As instruções estão em "Como liberar o acesso do navegador ao Ollama".'
+        : 'Não encontrei o Ollama em ' + base + '. Confirme que ele está aberto e que o endereço e a porta estão certos. Tente também http://127.0.0.1:11434.';
+}
 async function listOllama() {
     try {
         const res = await fetch($('#apiUrl').value.trim().replace(/\/+$/, '') + '/api/tags');
+        if (res.status === 403) throw new Error('forbidden');
         if (!res.ok) throw new Error('Ollama respondeu ' + res.status + '.');
         const names = ((await res.json()).models || []).map(m => m.name);
         $('#ollamaModels').replaceChildren(...names.map(n => el('option', { value: n })));
         if (names.length && !names.includes($('#apiModel').value)) { $('#apiModel').value = names[0]; saveAI() }
         notice(names.length ? names.length + ' modelos instalados: ' + names.join(', ') + '.' : 'O Ollama não tem modelos instalados. Rode ollama pull llama3.1 no terminal.', !names.length);
-    } catch (e) { notice('Não consegui falar com o Ollama em ' + $('#apiUrl').value + '. Confirme que ele está aberto e, se preciso, inicie com OLLAMA_ORIGINS=*.', true) }
+    } catch (e) { notice(/^Ollama respondeu/.test((e && e.message) || '') ? e.message : await diagnoseOllama($('#apiUrl').value), true) }
 }
 async function translateAndDownload() {
     if (S.busy) return;
@@ -421,7 +446,8 @@ $('#file').onchange = async e => { const f = e.target.files[0]; if (f) loadBytes
 const dz = $('#drop');
 dz.ondragover = e => { e.preventDefault(); dz.classList.add('over') }; dz.ondragleave = () => dz.classList.remove('over');
 dz.ondrop = async e => { e.preventDefault(); dz.classList.remove('over'); const f = e.dataTransfer.files[0]; if (f) loadBytes(new Uint8Array(await f.arrayBuffer()), f.name, false) };
-$('#srcSel').onchange = e => { S.src = +e.target.value; buildRows() };
+$('#srcSel').onchange = e => { S.srcLang = +e.target.value; buildRows() };
+$('#tblSel').onchange = e => { S.tblFilter = e.target.value; renderList(true) };
 $('#tgtSel').onchange = e => { S.tgt = +e.target.value; buildRows() };
 $('#btnAll').onclick = () => translateRows(S.rows.filter(r => status(r) === 'pending'));
 $('#btnStop').onclick = () => S.abort && S.abort.abort();
